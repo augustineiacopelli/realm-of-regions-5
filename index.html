@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Realm-of-Regions 5: Adventure Calls</title>
+<meta name="description" content="A turn-based adventure game by Simon with 18 regions, 144 enemies, 18 dragons, pets, skills, and a Bestiary.">
+<meta name="theme-color" content="#14110f">
+<style>
+:root{--bg:#14110f;--panel:#221c17;--panel2:#2e251d;--line:#4a3a2b;--gold:#f2b134;--sand:#e9d3a0;--text:#f4ead6;--muted:#b3a58b;--red:#e4572e;--green:#5fbf6a;--blue:#58a6d6}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:"Trebuchet MS",Verdana,sans-serif}
+#app{display:flex;flex-direction:column;height:100dvh;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+header{padding:10px 14px;background:var(--panel);border-bottom:2px solid var(--line)}
+.title{font-size:.95rem;color:var(--gold);font-weight:700;letter-spacing:.03em}
+.stats{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:6px;font-size:.85rem;color:var(--sand)}
+.bar{height:12px;background:#0c0a08;border:1px solid var(--line);border-radius:7px;overflow:hidden;margin-top:6px}
+.bar>i{display:block;height:100%;background:var(--green);transition:width .25s}
+.bar.e>i{background:var(--red)}
+main{flex:1;overflow-y:auto;padding:14px}
+h2{margin:0 0 10px;font-size:1.2rem;color:var(--gold)}
+h3{margin:16px 0 8px;font-size:1rem;color:var(--sand)}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.reg{min-height:78px;border:2px solid var(--line);border-radius:16px;background:var(--panel);color:var(--text);font:inherit;font-size:.82rem;padding:8px 4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}
+.reg .em{font-size:1.5rem}
+.reg.open{border-color:var(--gold);background:var(--panel2)}
+.reg.lock{opacity:.45}
+.btn{display:block;width:100%;min-height:48px;margin:8px 0;border:2px solid var(--gold);border-radius:14px;background:var(--panel2);color:var(--text);font:inherit;font-size:1rem;font-weight:700;padding:10px 14px}
+.btn:active{background:var(--gold);color:#1b1408}
+.btn.alt{border-color:var(--line);font-weight:400}
+.btn.danger{border-color:var(--red)}
+.btn[disabled]{opacity:.4}
+.row{display:grid;grid-template-columns:2fr 1fr;gap:8px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;margin:8px 0}
+.item{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)}
+.item:last-child{border-bottom:0}
+.item small{display:block;color:var(--muted)}
+.buy{min-width:84px;min-height:44px;border:2px solid var(--gold);border-radius:12px;background:var(--panel2);color:var(--text);font:inherit;font-weight:700}
+.buy[disabled]{opacity:.4}
+.arena{text-align:center}
+.big{font-size:4rem;line-height:1.1}
+.log{background:#0c0a08;border:1px solid var(--line);border-radius:12px;padding:10px;min-height:104px;font-size:.92rem;color:var(--sand)}
+.log div{margin:3px 0}
+.muted{color:var(--muted);font-size:.88rem}
+textarea{display:block;width:100%;min-height:120px;background:#0c0a08;color:var(--sand);border:1px solid var(--line);border-radius:12px;padding:10px;font-size:.8rem;font-family:monospace;margin:8px 0}
+.pill{display:inline-block;background:#0c0a08;border:1px solid var(--line);border-radius:999px;padding:3px 10px;margin:3px 3px 0 0;font-size:.82rem}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="title">Realm of Regions 5: Adventure Calls</div>
+    <div class="stats" id="stats"></div>
+    <div class="bar"><i id="hpbar"></i></div>
+  </header>
+  <main id="main"></main>
+</div>
+<script>
+"use strict";
+/* ---------- Easy to change numbers ---------- */
+const CONFIG = {
+  startHp: 20, startGold: 5, atkMin: 5, atkMax: 10, def: 2,
+  hpPerLevel: 5, atkPerLevel: 1, xpBase: 10, xpStep: 5,
+  startMp: 30, mpPerLevel: 3, powerCost: 5, mendCost: 8, mendHeal: 20,
+  innCost: 5, petChance: 1, petMinFrac: 0.25, petMaxFrac: 0.5, deathGoldLoss: 0.25
+};
+
+/* ---------- Game data from Simon's notes ---------- */
+const REGIONS = [
+  {id:"desert", name:"Desert Region", em:"🏜️", playable:true},
+  {id:"forest", name:"Forest Region", em:"🌲"},
+  {id:"mountain", name:"Mountain Region", em:"⛰️"},
+  {id:"jungle", name:"Jungle Region", em:"🌴"},
+  {id:"savanna", name:"Savanna Region", em:"🦒"},
+  {id:"mushroom", name:"Mushroom Field Region", em:"🍄"},
+  {id:"plain", name:"Plain Region", em:"🌾"},
+  {id:"tundra", name:"Tundra Region", em:"🧊"},
+  {id:"taiga", name:"Taiga Region", em:"🌨️"},
+  {id:"badland", name:"Badland Region", em:"🪨"},
+  {id:"swamp", name:"Swamp Region", em:"🐸"},
+  {id:"beach", name:"Beach Region", em:"🏖️"},
+  {id:"river", name:"River Region", em:"🏞️"},
+  {id:"ocean", name:"Ocean Region", em:"🌊"},
+  {id:"snowy", name:"Snowy Plain Region", em:"❄️"},
+  {id:"lava", name:"Lava Region", em:"🌋", dlc:true, from:"From Realm-of-Regions 2"},
+  {id:"frost", name:"Frost Region", em:"🧊", dlc:true, from:"From Realm-of-Regions 3"},
+  {id:"shadow", name:"Shadow Region", em:"🌑", dlc:true, from:"From Realm-of-Regions 4"}
+];
+
+/* All 15 bosses are saved here for later. Only the Desert Dragon is fightable right now. */
+const BOSSES = {
+  desert:{name:"Desert Dragon", em:"🐉", hp:60, atk:15, def:2, gold:60, xp:30},
+  forest:{name:"Forest Dragon", em:"🐲", hp:120, atk:25, def:5, gold:120, xp:60},
+  mountain:{name:"Mountain Dragon", em:"🐲", hp:180, atk:30, def:7, gold:180, xp:90},
+  jungle:{name:"Jungle Dragon", em:"🐲", hp:240, atk:45, def:7, gold:240, xp:120},
+  savanna:{name:"Savanna Dragon", em:"🐲", hp:300, atk:50, def:10, gold:300, xp:150},
+  mushroom:{name:"Mushroom Dragon", em:"🐲", hp:360, atk:75, def:5, gold:360, xp:180},
+  plain:{name:"Plain Dragon", em:"🐲", hp:420, atk:75, def:6, gold:420, xp:210},
+  tundra:{name:"Tundra Dragon", em:"🐲", hp:480, atk:75, def:7, gold:480, xp:240},
+  taiga:{name:"Taiga Dragon", em:"🐲", hp:540, atk:80, def:3, gold:540, xp:270},
+  badland:{name:"Badland Dragon", em:"🐲", hp:600, atk:90, def:10, gold:600, xp:300},
+  swamp:{name:"Swamp Dragon", em:"🐲", hp:660, atk:75, def:7, gold:660, xp:330},
+  beach:{name:"Beach Dragon", em:"🐲", hp:720, atk:85, def:9, gold:720, xp:360},
+  river:{name:"River Dragon", em:"🐲", hp:780, atk:97, def:7, gold:780, xp:390},
+  ocean:{name:"Ocean Dragon", em:"🐲", hp:840, atk:95, def:8, gold:840, xp:420},
+  snowy:{name:"Snowy Plain Dragon", em:"🐲", hp:900, atk:130, def:13, gold:900, xp:450},
+  lava:{name:"Lava Dragon", em:"🐲", hp:1000, atk:140, def:14, gold:1000, xp:500},
+  frost:{name:"Frost Dragon", em:"🐲", hp:1100, atk:150, def:15, gold:1100, xp:550},
+  shadow:{name:"Shadow Dragon", em:"🐲", hp:1250, atk:165, def:17, gold:1250, xp:625}
+};
+
+/* Desert enemies. weight = how often they appear. Special moves are explained in "note". */
+const ENEMIES = { desert: [
+  {name:"Sand Scorpion", em:"🦂", hp:12, atk:4, def:0, gold:[2,3], weight:4, note:"A quick little stinger."},
+  {name:"Vulture", em:"🦅", hp:18, atk:7, def:0, gold:[3,5], weight:3, note:"Hits hard but is fragile."},
+  {name:"Dust Devil", em:"🌪️", hp:14, atk:5, def:0, gold:[3,4], weight:3, dodge:0.25, note:"Spins away from 1 in 4 attacks."},
+  {name:"Sharp Cacti", em:"🌵", hp:22, atk:4, def:3, gold:[4,5], weight:3, thorns:1, note:"Its thorns hurt you for 1 each time you hit it."},
+  {name:"Quicksand", em:"🕳️", hp:26, atk:5, def:2, gold:[5,6], weight:2, slow:0.25, note:"Sometimes drags your swing to half damage."},
+  {name:"Mummy", em:"🧟", hp:30, atk:6, def:1, gold:[5,7], weight:2, note:"Slow and steady."},
+  {name:"Sandstorm", em:"🌫️", hp:28, atk:8, def:1, gold:[6,8], weight:2, blind:0.2, note:"Blinds you, so 1 in 5 swings miss."},
+  {name:"Sand Serpent", em:"🐍", hp:36, atk:9, def:3, gold:[8,10], weight:1, venom:0.25, note:"Venom bites add 3 extra damage."}
+],
+forest: [
+  {name:"Killer Bees", em:"🐝", hp:18, atk:8, def:0, gold:[7,9], weight:3, dodge:0.35, venom:0.3, note:"Hard to hit, and their stings can poison."},
+  {name:"Goblin", em:"👺", hp:26, atk:10, def:1, gold:[10,13], weight:3, dodge:0.15, note:"Sneaky and quick on its feet."},
+  {name:"Forest Wolf", em:"🐺", hp:28, atk:10, def:1, gold:[8,10], weight:4, note:"Fast bites from the shadows."},
+  {name:"Giant Spider", em:"🕷️", hp:24, atk:9, def:0, gold:[8,10], weight:3, venom:0.3, note:"Venom bites add 3 extra damage."},
+  {name:"Wild Boar", em:"🐗", hp:40, atk:11, def:2, gold:[10,12], weight:3, note:"Charges in with tough tusks."},
+  {name:"Bandit", em:"🥷", hp:34, atk:12, def:2, gold:[12,15], weight:3, dodge:0.15, note:"Ducks 1 in 7 attacks and carries lots of gold."},
+  {name:"Treant", em:"🌳", hp:60, atk:10, def:5, gold:[14,17], weight:2, thorns:2, note:"Bark is thick. Its thorns hurt you for 2 each time you hit it."},
+  {name:"Forest Troll", em:"🧌", hp:55, atk:14, def:3, gold:[16,20], weight:1, note:"The toughest thing in the woods besides the dragon."}
+],
+mountain: [
+  {name:"Cave Bat", em:"🦇", hp:30, atk:12, def:0, gold:[12,15], weight:3, dodge:0.3, note:"Flutters away from 3 in 10 attacks."},
+  {name:"Mountain Goat", em:"🐐", hp:40, atk:13, def:2, gold:[14,17], weight:4, note:"Rams you from the cliffs."},
+  {name:"Giant Eagle", em:"🦅", hp:38, atk:15, def:1, gold:[15,18], weight:3, dodge:0.25, note:"Dives from above and is hard to hit."},
+  {name:"Angry Miner", em:"⛏️", hp:50, atk:15, def:4, gold:[18,22], weight:3, note:"Swings a pickaxe and guards a stash of gold."},
+  {name:"Rockslide", em:"🪨", hp:50, atk:18, def:5, gold:[18,22], weight:2, slow:0.25, note:"Tumbling rocks sometimes cut your swing to half damage."},
+  {name:"Mountain Lion", em:"🦁", hp:55, atk:17, def:3, gold:[20,24], weight:2, note:"A fast and fierce pouncer."},
+  {name:"Mountain Bear", em:"🐻", hp:70, atk:16, def:4, gold:[22,27], weight:2, note:"Big, burly, and soaks up a lot of damage."},
+  {name:"Rock Golem", em:"🗿", hp:80, atk:14, def:8, gold:[26,32], weight:1, thorns:2, note:"Very high DEF. Its sharp stones hurt you for 2 each time you hit it."}
+],
+jungle: [
+  {name:"Parrot", em:"🦜", hp:38, atk:16, def:0, gold:[20,24], weight:3, dodge:0.3, note:"Squawks and flits away from 3 in 10 attacks."},
+  {name:"Jungle Fox", em:"🦊", hp:45, atk:18, def:2, gold:[22,26], weight:4, dodge:0.25, note:"Clever and quick. It dodges 1 in 4 attacks."},
+  {name:"Poison Frog", em:"🐸", hp:40, atk:15, def:1, gold:[20,24], weight:3, venom:0.4, note:"Its poison adds 3 extra damage 4 times in 10."},
+  {name:"Monkey Thief", em:"🐒", hp:50, atk:17, def:2, gold:[24,28], weight:3, dodge:0.2, note:"Swings through the trees and snatches gold."},
+  {name:"Jaguar", em:"🐆", hp:60, atk:21, def:3, gold:[26,31], weight:2, note:"A silent hunter with sharp claws."},
+  {name:"Carnivorous Plant", em:"🪴", hp:70, atk:19, def:5, gold:[28,33], weight:2, thorns:2, note:"Its snapping leaves hurt you for 2 each time you hit it."},
+  {name:"Giant Python", em:"🐍", hp:80, atk:20, def:4, gold:[30,36], weight:2, venom:0.3, note:"Squeezes hard with a venomous bite."},
+  {name:"Gorilla", em:"🦍", hp:100, atk:22, def:6, gold:[36,42], weight:1, note:"The king of the jungle. Tough and strong."}
+],
+savanna: [
+  {name:"Hyena", em:"🐕", hp:55, atk:22, def:2, gold:[30,34], weight:3, note:"Cackles and bites in packs."},
+  {name:"Savanna Wolf", em:"🐺", hp:60, atk:24, def:3, gold:[32,36], weight:4, note:"A tough hunter of the open grass."},
+  {name:"Cheetah", em:"🐆", hp:55, atk:26, def:1, gold:[34,38], weight:3, dodge:0.3, note:"The fastest animal around. It dodges 3 in 10 attacks."},
+  {name:"Zebra", em:"🦓", hp:75, atk:22, def:3, gold:[34,38], weight:3, dodge:0.15, note:"Strong kicks and a little dodge."},
+  {name:"Giraffe", em:"🦒", hp:90, atk:24, def:3, gold:[38,43], weight:2, note:"Its long neck swings down with a heavy bonk."},
+  {name:"Lion", em:"🦁", hp:90, atk:28, def:5, gold:[42,48], weight:2, note:"The king of the savanna."},
+  {name:"Rhino", em:"🦏", hp:110, atk:30, def:9, gold:[48,54], weight:1, note:"Thick armor skin. Bring a strong sword."},
+  {name:"Elephant", em:"🐘", hp:130, atk:27, def:8, gold:[52,60], weight:1, slow:0.2, note:"Huge and heavy. It sometimes cuts your swing to half damage."}
+],
+mushroom: [
+  {name:"Spore Puff", em:"🍄", hp:65, atk:25, def:1, gold:[40,44], weight:4, venom:0.3, note:"Puffs out poison spores that add 3 extra damage."},
+  {name:"Spore Bat", em:"🦇", hp:60, atk:28, def:0, gold:[42,46], weight:3, dodge:0.3, note:"Glows in the dark and dodges 3 in 10 attacks."},
+  {name:"Glowcap Snail", em:"🐌", hp:90, atk:24, def:6, gold:[44,48], weight:3, slow:0.25, note:"Its slimy shell sometimes cuts your swing to half damage."},
+  {name:"Toadstool Toad", em:"🐸", hp:80, atk:27, def:2, gold:[46,50], weight:3, venom:0.4, note:"Its poison adds 3 extra damage 4 times in 10."},
+  {name:"Mycelium Spider", em:"🕷️", hp:85, atk:30, def:3, gold:[50,55], weight:2, venom:0.3, note:"Spins sticky webs and bites with venom."},
+  {name:"Mushroom Wizard", em:"🧙", hp:70, atk:34, def:2, gold:[54,60], weight:2, blind:0.2, note:"Dazzling spore magic makes 1 in 5 of your swings miss."},
+  {name:"Fungus Troll", em:"🧌", hp:130, atk:32, def:5, gold:[60,66], weight:1, note:"A big bruiser covered in mushrooms."},
+  {name:"Shroom Golem", em:"🍄", hp:160, atk:30, def:9, gold:[66,74], weight:1, thorns:3, note:"Very tough. Its sharp caps hurt you for 3 each time you hit it."}
+],
+plain: [
+  {name:"Rattlesnake", em:"🐍", hp:70, atk:30, def:1, gold:[46,50], weight:3, venom:0.35, note:"Rattles, strikes, and its venom adds 3 extra damage."},
+  {name:"Coyote", em:"🐕", hp:85, atk:28, def:3, gold:[48,52], weight:4, note:"Quick and cunning on the open grass."},
+  {name:"Prairie Hawk", em:"🦅", hp:75, atk:32, def:1, gold:[50,55], weight:3, dodge:0.3, note:"Swoops from the sky and dodges 3 in 10 attacks."},
+  {name:"Scarecrow", em:"🎃", hp:100, atk:29, def:4, gold:[54,58], weight:2, note:"It looks silly, but it hits hard."},
+  {name:"Wild Horse", em:"🐎", hp:110, atk:33, def:3, gold:[58,62], weight:3, dodge:0.2, note:"Fast and strong, with a good dodge."},
+  {name:"Twister", em:"🌪️", hp:95, atk:35, def:2, gold:[60,66], weight:2, blind:0.2, note:"Whips up dust so 1 in 5 of your swings miss."},
+  {name:"Bull", em:"🐂", hp:140, atk:36, def:6, gold:[66,72], weight:2, note:"Charges with horns down."},
+  {name:"Bison", em:"🦬", hp:170, atk:34, def:8, gold:[74,82], weight:1, note:"The giant of the plains. Very tough."}
+],
+tundra: [
+  {name:"Arctic Fox", em:"🦊", hp:80, atk:30, def:2, gold:[58,62], weight:3, dodge:0.3, note:"White fur makes it hard to see. It dodges 3 in 10 attacks."},
+  {name:"Snowy Owl", em:"🦉", hp:75, atk:34, def:1, gold:[60,65], weight:3, dodge:0.25, note:"Silent wings and sharp talons."},
+  {name:"Frost Wolf", em:"🐺", hp:95, atk:33, def:3, gold:[62,66], weight:4, note:"Howls across the frozen ground."},
+  {name:"Angry Penguin", em:"🐧", hp:110, atk:31, def:4, gold:[64,70], weight:3, note:"Slides in belly first and slaps with its flippers."},
+  {name:"Walrus", em:"🦭", hp:130, atk:32, def:6, gold:[68,74], weight:2, slow:0.2, note:"Thick blubber sometimes cuts your swing to half damage."},
+  {name:"Ice Wraith", em:"👻", hp:100, atk:37, def:2, gold:[72,78], weight:2, blind:0.2, note:"Its freezing chill makes 1 in 5 of your swings miss."},
+  {name:"Polar Bear", em:"🐻‍❄️", hp:160, atk:38, def:7, gold:[80,88], weight:2, note:"The king of the frozen tundra."},
+  {name:"Woolly Mammoth", em:"🦣", hp:200, atk:36, def:9, gold:[90,100], weight:1, note:"Enormous and shaggy. The toughest creature on the tundra."}
+],
+taiga: [
+  {name:"Snowshoe Hare", em:"🐇", hp:70, atk:30, def:0, gold:[64,68], weight:3, dodge:0.35, note:"Bounds away from about 1 in 3 attacks."},
+  {name:"Lynx", em:"🐈", hp:90, atk:36, def:2, gold:[68,74], weight:3, dodge:0.25, note:"A stealthy cat that is hard to hit."},
+  {name:"Wolverine", em:"🦡", hp:100, atk:38, def:3, gold:[70,76], weight:4, note:"Small but ferocious."},
+  {name:"Elk", em:"🦌", hp:120, atk:34, def:4, gold:[72,78], weight:3, note:"Charges with a big set of antlers."},
+  {name:"Lumberjack", em:"🪓", hp:130, atk:37, def:4, gold:[78,86], weight:3, note:"Swings a mighty axe and carries a heavy coin purse."},
+  {name:"Pine Treant", em:"🌲", hp:150, atk:32, def:7, gold:[80,88], weight:2, thorns:3, note:"Its pine needles hurt you for 3 each time you hit it."},
+  {name:"Brown Bear", em:"🐻", hp:170, atk:40, def:6, gold:[86,94], weight:2, note:"Strong, hungry, and tough."},
+  {name:"Siberian Tiger", em:"🐅", hp:190, atk:44, def:5, gold:[96,106], weight:1, note:"The most dangerous hunter in the taiga."}
+],
+badland: [
+  {name:"Red Scorpion", em:"🦂", hp:110, atk:40, def:4, gold:[80,86], weight:4, venom:0.35, note:"A big scorpion from the red rocks. Its venom adds 3 extra damage."},
+  {name:"Carrion Vulture", em:"🦅", hp:105, atk:42, def:1, gold:[82,88], weight:3, dodge:0.3, note:"Circles the canyon and dodges 3 in 10 attacks."},
+  {name:"Red Dust Devil", em:"🌪️", hp:100, atk:40, def:0, gold:[82,88], weight:3, dodge:0.3, note:"Spins away from 3 in 10 attacks."},
+  {name:"Barrel Cactus", em:"🌵", hp:130, atk:38, def:6, gold:[88,94], weight:3, thorns:2, note:"Tough and round. Its spines hurt you for 2 each time you hit it."},
+  {name:"Clay Pit", em:"🕳️", hp:150, atk:40, def:4, gold:[92,98], weight:2, slow:0.25, note:"Sticky red mud sometimes cuts your swing to half damage."},
+  {name:"Red Sandstorm", em:"🌫️", hp:140, atk:46, def:2, gold:[98,106], weight:2, blind:0.2, note:"Red dust makes 1 in 5 of your swings miss."},
+  {name:"Canyon Rattler", em:"🐍", hp:170, atk:48, def:5, gold:[104,112], weight:2, venom:0.3, note:"A giant snake hiding in the canyon walls. Its venom adds 3 extra damage."},
+  {name:"Canyon Golem", em:"🗿", hp:240, atk:46, def:12, gold:[120,132], weight:1, thorns:3, note:"Very high DEF. Its jagged red rock hurts you for 3 each time you hit it."}
+],
+swamp: [
+  {name:"Swamp Leech", em:"🪱", hp:150, atk:41, def:1, gold:[84,90], weight:3, venom:0.4, note:"Sucks and poisons for 3 extra damage 4 times in 10."},
+  {name:"Bog Toad", em:"🐸", hp:165, atk:43, def:3, gold:[86,92], weight:4, note:"Big, slimy, and surprisingly strong."},
+  {name:"Mosquito Swarm", em:"🦟", hp:135, atk:45, def:0, gold:[86,92], weight:3, dodge:0.35, venom:0.3, note:"Buzzes around and is very hard to hit."},
+  {name:"Alligator", em:"🐊", hp:325, atk:80, def:14, gold:[120,130], weight:3, note:"Armored scales and a crushing death roll."},
+  {name:"Snapping Turtle", em:"🐢", hp:270, atk:41, def:10, gold:[98,106], weight:2, slow:0.25, note:"Its thick shell sometimes cuts your swing to half damage."},
+  {name:"Swamp Witch", em:"🧙", hp:195, atk:53, def:2, gold:[104,112], weight:2, blind:0.2, note:"Foggy magic makes 1 in 5 of your swings miss."},
+  {name:"Bog Zombie", em:"🧟", hp:300, atk:47, def:5, gold:[108,116], weight:2, note:"Rises from the muck and keeps coming."},
+  {name:"Moss Giant", em:"🌿", hp:315, atk:51, def:8, gold:[120,130], weight:1, thorns:2, note:"Covered in thorny vines that hurt you for 2 each time you hit it."}
+],
+beach: [
+  {name:"Hermit Crab", em:"🦀", hp:110, atk:38, def:8, gold:[88,94], weight:4, note:"Hides in a shell with strong armor."},
+  {name:"Seagull", em:"🐦", hp:95, atk:40, def:0, gold:[88,94], weight:3, dodge:0.3, note:"Swoops in for your snacks and dodges 3 in 10 attacks."},
+  {name:"Pufferfish", em:"🐡", hp:100, atk:38, def:2, gold:[92,98], weight:3, thorns:2, note:"Spiky! It hurts you for 2 each time you hit it."},
+  {name:"Sand Shark", em:"🦈", hp:140, atk:48, def:3, gold:[96,102], weight:3, note:"A fin slices through the sand and then bites."},
+  {name:"Coconut Crab", em:"🥥", hp:150, atk:44, def:9, gold:[98,104], weight:2, note:"Cracks coconuts and bones with its claws."},
+  {name:"Sand Golem", em:"🏖️", hp:190, atk:42, def:8, gold:[104,112], weight:2, slow:0.2, note:"Sometimes cuts your swing to half damage as sand slides away."},
+  {name:"Pirate", em:"🏴‍☠️", hp:170, atk:50, def:4, gold:[110,118], weight:2, dodge:0.2, note:"Fast with a cutlass and carries a chest full of gold."},
+  {name:"Giant Sea Turtle", em:"🐢", hp:260, atk:44, def:12, gold:[124,134], weight:1, note:"A massive shell. It is very hard to damage."}
+],
+river: [
+  {name:"Piranha", em:"🐟", hp:90, atk:42, def:0, gold:[90,96], weight:4, dodge:0.25, note:"Tiny but fierce. Dodges 1 in 4 attacks."},
+  {name:"River Otter", em:"🦦", hp:110, atk:38, def:2, gold:[90,96], weight:3, dodge:0.3, note:"Slippery and quick in the water."},
+  {name:"Water Snake", em:"🐍", hp:115, atk:44, def:2, gold:[94,100], weight:3, venom:0.35, note:"Its venom adds 3 extra damage."},
+  {name:"Beaver", em:"🦫", hp:140, atk:40, def:6, gold:[96,102], weight:3, note:"Chomps through anything with giant teeth."},
+  {name:"River Crocodile", em:"🐊", hp:180, atk:48, def:7, gold:[104,112], weight:2, note:"Lurks just under the surface."},
+  {name:"Water Spirit", em:"💧", hp:150, atk:52, def:3, gold:[108,116], weight:2, blind:0.2, note:"Splashes into your eyes so 1 in 5 of your swings miss."},
+  {name:"Hippo", em:"🦛", hp:240, atk:46, def:9, gold:[116,126], weight:2, note:"Looks sleepy, but has the strongest bite on the river."},
+  {name:"Giant Catfish", em:"🐠", hp:220, atk:44, def:11, gold:[120,130], weight:1, slow:0.25, note:"Slimy sides sometimes cut your swing to half damage."}
+],
+ocean: [
+  {name:"Octopus", em:"🐙", hp:130, atk:44, def:3, gold:[96,102], weight:3, dodge:0.2, note:"Slippery tentacles dodge 1 in 5 attacks."},
+  {name:"Squid", em:"🦑", hp:125, atk:46, def:2, gold:[98,104], weight:3, blind:0.25, note:"Squirts ink so 1 in 4 of your swings miss."},
+  {name:"Electric Eel", em:"⚡", hp:140, atk:50, def:2, gold:[100,108], weight:3, venom:0.3, note:"Its shock adds 3 extra damage."},
+  {name:"Shark", em:"🦈", hp:170, atk:52, def:4, gold:[106,114], weight:4, note:"The hunter of the deep sea."},
+  {name:"Anglerfish", em:"🎣", hp:150, atk:54, def:3, gold:[112,120], weight:2, note:"Lures you in with a glowing light."},
+  {name:"Siren", em:"🧜", hp:160, atk:56, def:3, gold:[116,124], weight:2, blind:0.25, note:"Her song makes 1 in 4 of your swings miss."},
+  {name:"Orca", em:"🐋", hp:260, atk:50, def:8, gold:[124,134], weight:2, note:"A huge and clever whale."},
+  {name:"Kraken", em:"🦑", hp:300, atk:52, def:10, gold:[140,150], weight:1, thorns:2, note:"A sea monster with spiked suckers that hurt you for 2 each time you hit it."}
+],
+snowy: [
+  {name:"Snowman", em:"⛄", hp:140, atk:50, def:2, gold:[120,128], weight:4, note:"Smiles while it throws freezing snowballs."},
+  {name:"Icicle Spider", em:"🕷️", hp:130, atk:54, def:3, gold:[122,130], weight:3, venom:0.35, note:"Its frost bite adds 3 extra damage."},
+  {name:"Blizzard Wolf", em:"🐺", hp:170, atk:56, def:4, gold:[128,136], weight:3, note:"Hunts in a howling whiteout."},
+  {name:"Snow Leopard", em:"🐆", hp:150, atk:60, def:2, gold:[130,138], weight:3, dodge:0.3, note:"Nearly invisible in the snow. Dodges 3 in 10 attacks."},
+  {name:"Yeti", em:"🦍", hp:240, atk:58, def:8, gold:[140,150], weight:2, note:"A huge and shaggy snow monster."},
+  {name:"Ice Witch", em:"🧙", hp:160, atk:62, def:3, gold:[142,152], weight:2, blind:0.25, note:"Her blizzard makes 1 in 4 of your swings miss."},
+  {name:"Frost Giant", em:"👹", hp:300, atk:64, def:10, gold:[160,172], weight:1, note:"The strongest monster before the final dragon."},
+  {name:"Ice Golem", em:"🧊", hp:280, atk:52, def:13, gold:[156,168], weight:1, thorns:3, note:"The highest DEF of all. Ice shards hurt you for 3 each time you hit it."}
+],
+lava: [
+  {name:"Fire Imp", em:"😈", hp:220, atk:65, def:3, gold:[150,160], weight:4, dodge:0.2, note:"A cackling little troublemaker that dodges 1 in 5 attacks."},
+  {name:"Magma Slime", em:"🟠", hp:260, atk:62, def:6, gold:[152,162], weight:3, thorns:2, note:"Burning goo hurts you for 2 each time you hit it."},
+  {name:"Ash Bat", em:"🦇", hp:200, atk:70, def:1, gold:[154,164], weight:3, dodge:0.3, note:"Flutters through the smoke and dodges 3 in 10 attacks."},
+  {name:"Lava Lizard", em:"🦎", hp:280, atk:68, def:7, gold:[160,170], weight:3, note:"Crawls out of the lava with scorching claws."},
+  {name:"Ember Wolf", em:"🐺", hp:300, atk:72, def:5, gold:[164,174], weight:3, venom:0.3, note:"Its burns add 3 extra damage."},
+  {name:"Smoke Spirit", em:"💨", hp:250, atk:75, def:3, gold:[168,178], weight:2, blind:0.25, note:"Thick smoke makes 1 in 4 of your swings miss."},
+  {name:"Fire Elemental", em:"🔥", hp:340, atk:78, def:8, gold:[176,188], weight:2, note:"A walking flame with a blazing punch."},
+  {name:"Obsidian Golem", em:"🗿", hp:450, atk:70, def:18, gold:[200,215], weight:1, thorns:4, note:"The highest DEF in the lava fields. Sharp glass hurts you for 4 each time you hit it."}
+],
+frost: [
+  {name:"Frost Sprite", em:"🧚", hp:210, atk:66, def:2, gold:[152,162], weight:4, dodge:0.3, note:"A tiny glittering sprite that dodges 3 in 10 attacks."},
+  {name:"Ice Wisp", em:"🌬️", hp:230, atk:70, def:1, gold:[160,170], weight:3, dodge:0.35, note:"A swirl of freezing air. It dodges about 1 in 3 attacks."},
+  {name:"Frost Falcon", em:"🦅", hp:240, atk:72, def:3, gold:[158,168], weight:3, dodge:0.25, note:"Dives with icy talons."},
+  {name:"Ice Harpy", em:"🪶", hp:270, atk:74, def:4, gold:[164,174], weight:3, note:"Screeches and slashes with frozen claws."},
+  {name:"Blizzard Elemental", em:"❄️", hp:300, atk:78, def:4, gold:[170,180], weight:3, blind:0.2, note:"Whirling snow makes 1 in 5 of your swings miss."},
+  {name:"Ice Stag", em:"🦌", hp:310, atk:76, def:6, gold:[176,186], weight:2, note:"A crystal antlered stag that charges."},
+  {name:"Frost Knight", em:"⚔️", hp:320, atk:80, def:9, gold:[180,192], weight:2, note:"A frozen soldier with strong icy armor."},
+  {name:"Glacier Giant", em:"🧊", hp:460, atk:72, def:14, gold:[205,220], weight:1, slow:0.2, note:"Huge and made of ice. It sometimes cuts your swing to half damage."}
+],
+shadow: [
+  {name:"Shadow Wraith", em:"👻", hp:240, atk:72, def:0, gold:[155,165], weight:4, dodge:0.35, note:"Slips through attacks. It dodges about 1 in 3."},
+  {name:"Shadow Knight", em:"💀", hp:270, atk:70, def:4, gold:[160,170], weight:4, note:"A dark warrior with a rusty sword."},
+  {name:"Shadow Raven", em:"🐦", hp:230, atk:76, def:1, gold:[158,168], weight:3, dodge:0.3, note:"A raven made of darkness that dodges 3 in 10 attacks."},
+  {name:"Shadow Stalker", em:"🥷", hp:330, atk:68, def:6, gold:[166,176], weight:3, note:"Creeps up silently and never stops hunting."},
+  {name:"Night Vampire", em:"🧛", hp:320, atk:82, def:5, gold:[176,188], weight:3, venom:0.3, note:"Its bite adds 3 extra damage."},
+  {name:"Shadow Witch", em:"🧙", hp:280, atk:84, def:3, gold:[180,192], weight:2, blind:0.25, note:"Dark magic makes 1 in 4 of your swings miss."},
+  {name:"Dark Armor", em:"🛡️", hp:380, atk:74, def:14, gold:[192,206], weight:2, thorns:3, note:"Empty armor full of darkness. Its spikes hurt you for 3 each time you hit it."},
+  {name:"Shadow Reaper", em:"☠️", hp:480, atk:90, def:10, gold:[215,235], weight:1, note:"The scariest creature in the shadow realm."}
+]};
+
+const SWORDS = [
+  {id:"wood", name:"Wooden Sword", atk:1, cost:7},
+  {id:"gold", name:"Gold Sword", atk:2, cost:10},
+  {id:"stone", name:"Stone Sword", atk:5, cost:20},
+  {id:"iron", name:"Iron Sword", atk:10, cost:40},
+  {id:"diamond", name:"Diamond Sword", atk:13, cost:80},
+  {id:"darkeye", name:"Darkeye Sword", atk:15, cost:160},
+  {id:"nether", name:"Netherite Sword", atk:20, cost:320}
+];
+const HEALS = [
+  {id:"carrot", name:"Carrot", heal:10, cost:10},
+  {id:"apple", name:"Apple", heal:30, cost:60},
+  {id:"teddy", name:"Teddy Bear", mp:30, cost:30, reusable:true}
+];
+const BOOSTS = [
+  {id:"gcarrot", name:"Gold Carrot", add:30, cost:30},
+  {id:"gapple", name:"Gold Apple", add:30, cost:60},
+  {id:"egapple", name:"Enchanted Gold Apple", add:60, cost:120},
+  {id:"egcarrot", name:"Enchanted Gold Carrot", add:75, cost:150}
+];
+const PETS = [
+  {id:"wolf", name:"Wolf", em:"🐺", atk:30, cost:40},
+  {id:"tiger", name:"Tiger", em:"🐯", atk:50, cost:50},
+  {id:"grizzly", name:"Grizzly Bear", em:"🐻", atk:70, cost:60},
+  {id:"mystery", name:"Mystery Pet", em:"❓", atk:0, cost:100}
+];
+
+const SKILLS = [
+  {id:"power", name:"Power Strike", em:"💥", lv:1, mp:CONFIG.powerCost, mult:2, desc:"double damage"},
+  {id:"mend", name:"Mend", em:"✨", lv:1, mp:CONFIG.mendCost, heal:CONFIG.mendHeal, desc:"recover "+CONFIG.mendHeal+" HP"},
+  {id:"triple", name:"Triple Slash", em:"🌀", lv:10, mp:15, mult:3, desc:"triple damage"},
+  {id:"greater", name:"Greater Mend", em:"💖", lv:15, mp:25, healPct:0.25, desc:"recover 25% of your max HP"},
+  {id:"mega", name:"Mega Strike", em:"🔥", lv:25, mp:35, mult:5, desc:"5 times damage"},
+  {id:"hero", name:"Hero's Wrath", em:"🌟", lv:40, mp:60, mult:9, desc:"9 times damage"}
+];
+
+/* ---------- Save and state ---------- */
+const KEY = "ror5_adventure_calls_v2";
+function fresh(){
+  return {hp:CONFIG.startHp, maxHp:CONFIG.startHp, gold:CONFIG.startGold, lv:1, xp:0, dlcDone:false, mp:CONFIG.startMp, maxMp:CONFIG.startMp, sword:null,
+    inv:{carrot:0, apple:0, teddy:0, gcarrot:0, gapple:0, egapple:0}, pets:[], tattle:false, beaten:{}, kills:0};
+}
+let S = fresh();
+try {
+  const raw = localStorage.getItem(KEY);
+  if (raw) {
+    const sv = JSON.parse(raw);
+    S = Object.assign(fresh(), sv);
+    if (sv.maxMp === undefined) { S.maxMp = CONFIG.startMp + CONFIG.mpPerLevel*(S.lv-1); S.mp = S.maxMp; }
+  }
+} catch (e) {}
+function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+
+let screen = "map", region = null, backTo = "map", B = null, confirmReset = false, townMsg = "";
+
+/* ---------- Helpers ---------- */
+const $ = id => document.getElementById(id);
+const rnd = (a,b) => Math.floor(Math.random()*(b-a+1))+a;
+function swordBonus(){ return S.sword ? SWORDS.find(s=>s.id===S.sword).atk : 0; }
+function atkRange(){ const b = swordBonus() + (S.lv-1)*CONFIG.atkPerLevel; return [CONFIG.atkMin+b, CONFIG.atkMax+b]; }
+function xpNeeded(lv){ return CONFIG.xpBase + CONFIG.xpStep*(lv-1); }
+function xpFor(e){ return e.xp || Math.max(1, Math.round((e.max + 3*e.atk + 3*e.def)/8)); }
+function pick(list){ const t = list.reduce((s,e)=>s+e.weight,0); let r = Math.random()*t; for (const e of list){ r -= e.weight; if (r<=0) return e; } return list[0]; }
+function petList(){ return S.pets.map(p => PETS.find(x=>x.id===p.id)); }
+
+function drawHeader(){
+  const [lo,hi] = atkRange();
+  $("stats").innerHTML = `<span>⭐ Lv ${S.lv} (XP ${S.xp}/${xpNeeded(S.lv)})</span><span>❤️ ${S.hp}/${S.maxHp}</span><span>🔷 MP ${S.mp}/${S.maxMp}</span><span>🪙 ${S.gold}g</span><span>⚔️ ATK ${lo} to ${hi}</span><span>🛡️ DEF ${CONFIG.def}</span>`;
+  $("hpbar").style.width = Math.max(0, S.hp/S.maxHp*100) + "%";
+}
+function go(s, extra){ screen = s; if (extra) Object.assign(window, extra); render(); $("main").scrollTop = 0; }
+
+/* ---------- Screens ---------- */
+function render(){
+  drawHeader(); save();
+  const m = $("main");
+  if (screen==="map") m.innerHTML = mapHTML();
+  else if (screen==="region") m.innerHTML = regionHTML();
+  else if (screen==="town") m.innerHTML = townHTML();
+  else if (screen==="dex") m.innerHTML = dexHTML();
+  else if (screen==="save") m.innerHTML = saveHTML();
+  else if (screen==="battle") m.innerHTML = battleHTML();
+}
+
+function mapHTML(){
+  const cards = REGIONS.map((r,i) => {
+    if (r.dlc) return S.dlcDone ? `<button class="reg open" onclick="enterRegion('${r.id}')"><span class="em">${r.em}</span>${r.name}</button>` : "";
+    const unlocked = i===0 || S.beaten[REGIONS[i-1].id];
+    if (ENEMIES[r.id] && unlocked) return `<button class="reg open" onclick="enterRegion('${r.id}')"><span class="em">${r.em}</span>${r.name}</button>`;
+    const msg = unlocked ? `${r.name} is still being built. Come back soon!` : `Beat the ${BOSSES[REGIONS[i-1].id].name} to unlock ${r.name}.`;
+    return `<button class="reg lock" onclick="comingSoon(${JSON.stringify(msg).replace(/"/g,'&quot;')})"><span class="em">🔒</span>${r.name}</button>`;
+  }).join("");
+  const petsOwned = petList().map(p=>`<span class="pill">${p.em} ${p.name}</span>`).join("") || `<span class="muted">No pets yet</span>`;
+  return `<h2>Choose your region</h2>
+    <div class="grid">${cards}</div>
+    ${dlcHTML()}
+    <button class="btn" onclick="openTown('map')">🏪 Inn and Store</button>
+    <button class="btn alt" onclick="go('dex')">📖 Bestiary</button>
+    <button class="btn alt" onclick="go('save')">💾 Save code</button>
+    <div class="card"><b>Your pack</b><br>
+      <span class="pill">🥕 Carrot ${S.inv.carrot||0}</span><span class="pill">🍎 Apple ${S.inv.apple||0}</span><span class="pill">🧸 Teddy Bear ${(S.inv.teddy||0)>0?"yes":"no"}</span>
+      <span class="pill">🥕✨ Gold Carrot ${S.inv.gcarrot||0}</span><span class="pill">🍏✨ Gold Apple ${S.inv.gapple||0}</span><span class="pill">🍎💎 Enchanted Gold Apple ${S.inv.egapple||0}</span><span class="pill">🥕💎 Enchanted Gold Carrot ${S.inv.egcarrot||0}</span>
+      <span class="pill">📖 Tattle Book ${S.tattle?"yes":"no"}</span><br>${petsOwned}<br>
+      <span class="muted">Dragons beaten: ${Object.keys(S.beaten).length} of ${S.beaten.snowy?18:15}</span></div>
+    <div id="toast" class="muted">${townMsg}</div>
+    <div class="muted" style="margin-top:14px">Realm-of-Regions 5: Adventure Calls, made by Simon</div>`;
+}
+function dlcHTML(){
+  if (S.dlcDone) return "";
+  const open = !!S.beaten.snowy;
+  const cards = REGIONS.filter(r=>r.dlc).map(r => open
+    ? `<button class="reg open" onclick="enterRegion('${r.id}')"><span class="em">${r.em}</span>${r.name}<span class="muted" style="font-size:.68rem">${r.from}</span></button>`
+    : `<button class="reg lock" onclick="comingSoon('Beat the Snowy Plain Dragon to unlock the DLC.')"><span class="em">🔒</span>DLC Region</button>`).join("");
+  return `<h3>${open?"⭐ DLC regions unlocked":"🔒 DLC: beat the Snowy Plain Dragon to unlock 3 new regions"}</h3><div class="grid">${cards}</div>`;
+}
+function dexHTML(){
+  const d = S.dex || {}; let tot = 0, seen = 0;
+  const secs = REGIONS.filter(r=>!r.dlc || S.beaten.snowy).map(r=>{
+    const list = (ENEMIES[r.id]||[]).concat([BOSSES[r.id]]);
+    const rows = list.map(e=>{ tot++; const n = d[e.name]||0; if (n) seen++;
+      return n ? `<div class="item"><div><b>${e.em||"🐲"} ${e.name}</b><small>HP ${e.hp} · ATK ${e.atk} · DEF ${e.def}${e.note?"<br>"+e.note:""}</small></div><span class="pill">x${n}</span></div>`
+               : `<div class="item"><div><b>❓ ???</b><small>Not defeated yet</small></div></div>`; }).join("");
+    return `<h3>${r.em} ${r.name}</h3><div class="card">${rows}</div>`; }).join("");
+  return `<h2>📖 Bestiary</h2><div class="muted">Discovered ${seen} of ${tot}. Defeat an enemy to fill in its page.</div>${secs}<button class="btn alt" onclick="go('map')">⬅️ Back to the map</button>`;
+}
+let saveMsg = "", impText = "", confirmLoad = false;
+function encodeSave(){ return "ROR5:" + btoa(unescape(encodeURIComponent(JSON.stringify(S)))); }
+function saveHTML(){
+  return `<h2>💾 Save code</h2>
+    <div class="card muted">Your game saves by itself in this browser. To move your adventure to another website or device, copy this code, then paste it into the game there and tap Load.</div>
+    <b>Your code</b>
+    <textarea id="exp" readonly onclick="this.select()">${encodeSave()}</textarea>
+    <button class="btn" onclick="copyCode()">Copy my code</button>
+    <b>Load a code</b>
+    <textarea id="imp" placeholder="Paste a code here that starts with ROR5:" oninput="impText=this.value;confirmLoad=false">${impText}</textarea>
+    <button class="btn danger" onclick="loadCode()">${confirmLoad?"Tap again to replace my progress":"Load this code"}</button>
+    <div class="muted">${saveMsg}</div>
+    <button class="btn alt" onclick="saveMsg='';impText='';confirmLoad=false;go('map')">⬅️ Back to the map</button>`;
+}
+function copyCode(){
+  const t = $("exp");
+  try { navigator.clipboard.writeText(t.value).then(()=>{saveMsg="Copied!";render();}, ()=>{t.select();document.execCommand("copy");saveMsg="Copied, or tap the code box and copy it yourself.";render();}); }
+  catch (e) { t.select(); try { document.execCommand("copy"); } catch (e2) {} saveMsg="Tap the code box and copy it yourself if needed."; render(); }
+}
+function loadCode(){
+  const v = ($("imp").value||"").trim();
+  try {
+    if (!v.startsWith("ROR5:")) throw new Error("bad");
+    const o = JSON.parse(decodeURIComponent(escape(atob(v.slice(5)))));
+    if (typeof o.lv!=="number" || typeof o.gold!=="number" || typeof o.maxHp!=="number") throw new Error("bad");
+    if (!confirmLoad){ confirmLoad = true; impText = v; saveMsg = "This will replace your current progress. Tap the button again to continue."; render(); return; }
+    S = Object.assign(fresh(), o); confirmLoad = false; impText = ""; saveMsg = ""; townMsg = "Your adventure was loaded!"; go("map");
+  } catch (e) { confirmLoad = false; impText = v; saveMsg = "That code did not work. Make sure you copied all of it."; render(); }
+}
+function comingSoon(msg){ townMsg = msg; render(); }
+
+function enterRegion(id){ region = id; townMsg = ""; itemsOpen = false; go("region"); }
+function regionHTML(){
+  const r = REGIONS.find(x=>x.id===region), b = BOSSES[region];
+  const done = S.beaten[region];
+  return `<h2>${r.em} ${r.name}</h2>
+    <div class="card muted">Fight enemies for gold, then buy gear and face the ${b.name}.${done?" You already beat this dragon!":""}</div>
+    <button class="btn" onclick="startFight(false)">🗡️ Explore and fight</button>
+    <button class="btn danger" onclick="startFight(true)">${b.em||"🐉"} Challenge the ${b.name}</button>
+    <button class="btn alt" onclick="openTown('region')">🏪 Inn and Store</button>
+    <button class="btn alt" onclick="useItemsOutside()">🎒 ${itemsOpen?"Close your pack":"Use an item"}</button>
+    ${itemsOpen?itemRows(true):""}
+    <div class="muted">${townMsg}</div>
+    <button class="btn alt" onclick="go('map')">⬅️ Back to the map</button>`;
+}
+let itemsOpen = false;
+function useItemsOutside(){ itemsOpen = !itemsOpen; render(); }
+function allItems(){ return HEALS.concat(BOOSTS); }
+function itemDesc(h){ return h.heal ? `recovers ${h.heal} HP` : h.mp ? `restores ${h.mp} MP` : `gain ${h.add} more max HP`; }
+function itemRows(outside){
+  return allItems().map(h=>{ const n = S.inv[h.id]||0;
+    return `<button class="btn" ${n<1||!canUse(h)?"disabled":""} onclick="useItem('${h.id}'${outside?",true":""})">${h.name} ${h.reusable?"(reusable, "+itemDesc(h)+")":"x"+n+" ("+itemDesc(h)+")"}</button>`; }).join("");
+}
+
+/* ---------- Town ---------- */
+function openTown(from){ backTo = from; go("town"); }
+function townHTML(){
+  const best = S.sword ? SWORDS.findIndex(s=>s.id===S.sword) : -1;
+  const sw = SWORDS.map((s,i)=>{
+    const owned = i<=best;
+    return `<div class="item"><div><b>${s.name}</b><small>ATK +${s.atk}${S.sword===s.id?" (equipped)":""}</small></div>
+      <button class="buy" ${owned||S.gold<s.cost?"disabled":""} onclick="buySword('${s.id}')">${owned?"Owned":s.cost+"g"}</button></div>`;
+  }).join("");
+  const hl = HEALS.map(h=>`<div class="item"><div><b>${h.name}</b><small>${h.heal?"Recovers "+h.heal+" HP":"Restores "+h.mp+" MP"}${h.reusable?". Reusable, you never run out":", you have "+(S.inv[h.id]||0)}</small></div>
+      <button class="buy" ${S.gold<h.cost||(h.reusable&&(S.inv[h.id]||0)>0)?"disabled":""} onclick="buyHeal('${h.id}')">${h.reusable&&(S.inv[h.id]||0)>0?"Owned":h.cost+"g"}</button></div>`).join("");
+  const bs = BOOSTS.map(h=>`<div class="item"><div><b>${h.name}</b><small>Gain ${h.add} more max HP when you use it, you have ${S.inv[h.id]||0}</small></div>
+      <button class="buy" ${S.gold<h.cost?"disabled":""} onclick="buyBoost('${h.id}')">${h.cost}g</button></div>`).join("");
+  const pt = PETS.map(p=>{
+    const owned = S.pets.some(x=>x.id===p.id);
+    return `<div class="item"><div><b>${p.em} ${p.id==="mystery"?"Pet ???":"Pet: "+p.name}</b><small>${p.id==="mystery"?"ATK ??? (a surprise)":"ATK "+p.atk}</small></div>
+      <button class="buy" ${owned||S.gold<p.cost?"disabled":""} onclick="buyPet('${p.id}')">${owned?"Owned":p.cost+"g"}</button></div>`;
+  }).join("");
+  return `<h2>🏪 Inn and Store</h2>
+    <div class="card"><div class="item"><div><b>🛏️ Inn Rest</b><small>Restore all your HP and MP</small></div>
+      <button class="buy" ${S.gold<CONFIG.innCost||(S.hp>=S.maxHp&&S.mp>=S.maxMp)?"disabled":""} onclick="rest()">${CONFIG.innCost}g</button></div></div>
+    <div class="muted">${townMsg}</div>
+    <h3>Store</h3>
+    <div class="card"><div class="item"><div><b>📖 Tattle Book</b><small>Lets you see an enemy's HP, ATK and DEF in battle</small></div>
+      <button class="buy" ${S.tattle||S.gold<3?"disabled":""} onclick="buyTattle()">${S.tattle?"Owned":"3g"}</button></div></div>
+    <h3>Swords</h3><div class="card">${sw}</div>
+    <h3>Food</h3><div class="card">${hl}</div>
+    <h3>Max HP boosts</h3><div class="card">${bs}</div>
+    <h3>Pets (they help in battle)</h3><div class="card">${pt}</div>
+    <button class="btn alt" onclick="townMsg='';go(backTo)">⬅️ Leave the store</button>`;
+}
+function spend(c){ if (S.gold<c) return false; S.gold -= c; return true; }
+function rest(){ if (S.hp>=S.maxHp && S.mp>=S.maxMp){ townMsg="You are already rested."; render(); return; } if(!spend(CONFIG.innCost)) return; S.hp = S.maxHp; S.mp = S.maxMp; townMsg="You slept well. HP and MP are full!"; render(); }
+function buyTattle(){ if(S.tattle||!spend(3)) return; S.tattle = true; townMsg="You bought the Tattle Book."; render(); }
+function buySword(id){ const s = SWORDS.find(x=>x.id===id); if(!spend(s.cost)) return; S.sword = id; townMsg=`You equipped the ${s.name}.`; render(); }
+function buyHeal(id){ const h = HEALS.find(x=>x.id===id); if(h.reusable && (S.inv[id]||0)>0) return; if(!spend(h.cost)) return; S.inv[id] = (S.inv[id]||0)+1; townMsg=`Bought a ${h.name}.`; render(); }
+function buyBoost(id){ const h = BOOSTS.find(x=>x.id===id); if(!spend(h.cost)) return; S.inv[id] = (S.inv[id]||0) + 1; townMsg=`Bought a ${h.name}. Use it from your pack to gain ${h.add} max HP.`; render(); }
+function buyPet(id){ const p = PETS.find(x=>x.id===id); if(S.pets.some(x=>x.id===id)||!spend(p.cost)) return;
+  const entry = {id}; if (id==="mystery") entry.atk = rnd(20,80); S.pets.push(entry);
+  townMsg = id==="mystery" ? "Your mystery pet hatched! Its power is a secret." : `${p.name} joined you!`; render(); }
+
+/* ---------- Battle ---------- */
+function startFight(boss){
+  if (S.hp<=0) S.hp = 1;
+  let e;
+  if (boss){ const b = BOSSES[region]; e = Object.assign({}, b, {isBoss:true, gold:[b.gold,b.gold]}); }
+  else {
+    const forced = S.forceNext && S.forceNext[region] && ENEMIES[region].find(x=>x.name===S.forceNext[region]);
+    if (forced) { delete S.forceNext[region]; e = Object.assign({}, forced); }
+    else e = Object.assign({}, pick(ENEMIES[region]));
+  }
+  e.max = e.hp; e.seen = false;
+  B = {e, log:[boss?`The ${e.name} blocks your path!`:`A wild ${e.name} appears!`], over:false, won:false, itemMenu:false};
+  go("battle");
+}
+function battleHTML(){
+  const e = B.e;
+  const stat = (S.tattle && e.seen) ? `<div class="muted">HP ${Math.max(0,e.hp)}/${e.max} · ATK ${e.atk} · DEF ${e.def}${e.note?"<br>"+e.note:""}</div>` : `<div class="muted">HP ${Math.max(0,e.hp)}/${e.max}</div>`;
+  const log = B.log.slice(-5).map(l=>`<div>${l}</div>`).join("");
+  let controls;
+  if (B.over){
+    controls = `<button class="btn" onclick="endBattle()">${B.won?"Continue":"Wake up at the inn"}</button>`;
+  } else if (B.itemMenu){
+    const rows = itemRows(false);
+    controls = rows + `<button class="btn alt" onclick="B.itemMenu=false;render()">Back</button>`;
+  } else if (B.skillMenu){
+    const have = SKILLS.filter(s=>S.lv>=s.lv);
+    const next = SKILLS.find(s=>S.lv<s.lv);
+    controls = have.map(s=>`<button class="btn" ${S.mp<s.mp||(s.heal||s.healPct)&&S.hp>=S.maxHp?"disabled":""} onclick="useSkill('${s.id}')">${s.em} ${s.name} (${s.mp} MP): ${s.desc}</button>`).join("")
+      + (next ? `<div class="muted">Next skill: ${next.name} at level ${next.lv}</div>` : "")
+      + `<button class="btn alt" onclick="B.skillMenu=false;render()">Back</button>`;
+  } else {
+    controls = `<button class="btn" onclick="playerAttack()">⚔️ Attack</button>
+      <div class="row"><button class="btn alt" onclick="B.skillMenu=true;render()">✨ Skills</button>
+      <button class="btn alt" onclick="B.itemMenu=true;render()">🎒 Items</button></div>
+      <div class="row"><button class="btn alt" ${S.tattle?"":"disabled"} onclick="tattle()">📖 Tattle</button>
+      <button class="btn alt" onclick="runAway()">🏃 Run away</button></div>`;
+  }
+  const pets = petList().map(p=>p.em).join(" ");
+  return `<div class="arena"><div class="big">${e.em}</div><h2>${e.name}</h2>
+    <div class="bar e"><i style="width:${Math.max(0,e.hp/e.max*100)}%"></i></div>${stat}
+    ${isDlc()?`<div class="muted">Pets cannot help in the DLC regions.</div>`:(pets?`<div class="muted">Your pets: ${pets}</div>`:"")}</div>
+    <div class="log">${log}</div>${controls}`;
+}
+function tattle(){ B.e.seen = true; B.log.push("You read the Tattle Book."); render(); }
+function runAway(){ townMsg = "You ran away safely."; B = null; go("region"); }
+
+function playerAttack(mult, cost, label){
+  if (B.over) return;
+  mult = mult || 1; cost = cost || 0;
+  if (S.mp < cost) return;
+  S.mp -= cost; B.skillMenu = false;
+  const e = B.e, L = B.log;
+  if (label) L.push(`💥 You use ${label}!`);
+  if (e.blind && Math.random()<e.blind) L.push(`${e.name} blinds you. You miss!`);
+  else if (e.dodge && Math.random()<e.dodge) L.push(`${e.name} spins out of the way!`);
+  else {
+    const [lo, hi] = atkRange();
+    let d = Math.max(1, rnd(lo, hi)*mult - e.def);
+    if (e.slow && Math.random()<e.slow){ d = Math.max(1, Math.floor(d/2)); L.push("The sand drags at your sword."); }
+    e.hp -= d; L.push(`You hit ${e.name} for ${d}.`);
+    if (e.thorns){ S.hp -= e.thorns; L.push(`Thorns prick you for ${e.thorns}.`); }
+  }
+  afterPlayer();
+}
+function isDlc(){ const r = REGIONS.find(x=>x.id===region); return !!(r && r.dlc && !S.dlcDone); }
+function afterPlayer(){
+  const e = B.e, L = B.log;
+  for (const p of (isDlc() ? [] : petList())){
+    if (e.hp<=0) break;
+    if (Math.random() < CONFIG.petChance){
+      const entry = S.pets.find(x=>x.id===p.id), power = (entry && entry.atk) || p.atk;
+      const d = Math.max(1, rnd(Math.ceil(power*CONFIG.petMinFrac), Math.ceil(power*CONFIG.petMaxFrac)) - e.def);
+      e.hp -= d; L.push(`${p.em} ${p.name} attacks for ${d}!`);
+    }
+  }
+  if (S.hp<=0) return lose();
+  if (e.hp<=0) return win();
+  let d = Math.max(1, e.atk - CONFIG.def);
+  if (e.venom && Math.random()<e.venom){ d += 3; L.push("Venom! Extra damage."); }
+  S.hp -= d; L.push(`${e.name} hits you for ${d}.`);
+  if (S.hp<=0) return lose();
+  render();
+}
+function canUse(h){ return true; }
+function useItem(id, outside){
+  const h = allItems().find(x=>x.id===id);
+  if ((S.inv[id]||0)<1 || !canUse(h)) return;
+  if (!h.reusable) S.inv[id]--;
+  let msg;
+  if (h.heal){ const b = S.hp; S.hp = Math.min(S.maxHp, S.hp + h.heal); msg = `recover ${S.hp-b} HP`; }
+  else if (h.mp){ const b = S.mp; S.mp = Math.min(S.maxMp, S.mp + h.mp); msg = `restore ${S.mp-b} MP`; }
+  else { S.maxHp += h.add; S.hp += h.add; msg = `gain ${h.add} max HP (now ${S.maxHp})`; }
+  if (outside){ townMsg = `You used a ${h.name} and ${msg}.`; render(); return; }
+  B.log.push(`You use a ${h.name} and ${msg}.`); B.itemMenu = false;
+  afterPlayer();
+}
+function useSkill(id){
+  const s = SKILLS.find(x=>x.id===id);
+  if (!s || S.lv<s.lv || S.mp<s.mp) return;
+  if (s.mult) { playerAttack(s.mult, s.mp, s.name); return; }
+  if (S.hp>=S.maxHp) return;
+  S.mp -= s.mp; const b = S.hp;
+  const amt = s.healPct ? Math.ceil(S.maxHp*s.healPct) : s.heal;
+  S.hp = Math.min(S.maxHp, S.hp+amt);
+  B.log.push(`${s.em} You cast ${s.name} and recover ${S.hp-b} HP.`); B.skillMenu = false; afterPlayer();
+}
+function win(){
+  const e = B.e, g = rnd(e.gold[0], e.gold[1]);
+  S.gold += g; S.kills++; S.dex = S.dex || {}; S.dex[e.name] = (S.dex[e.name]||0) + 1; B.over = true; B.won = true;
+  const xp = xpFor(e); S.xp += xp;
+  B.log.push(`You defeated ${e.name}! You found ${g} gold and earned ${xp} XP.`);
+  while (S.xp >= xpNeeded(S.lv)){
+    S.xp -= xpNeeded(S.lv); S.lv++; S.maxHp += CONFIG.hpPerLevel; S.hp += CONFIG.hpPerLevel; S.maxMp += CONFIG.mpPerLevel; S.mp += CONFIG.mpPerLevel;
+    B.log.push(`⭐ LEVEL UP! You are now level ${S.lv}. Max HP +${CONFIG.hpPerLevel}, Max MP +${CONFIG.mpPerLevel}, ATK +${CONFIG.atkPerLevel}.`);
+    SKILLS.filter(s=>s.lv===S.lv && s.lv>1).forEach(s=>B.log.push(`🎓 New skill learned: ${s.name}!`));
+  }
+  if (e.isBoss){
+    S.beaten[region] = true;
+    const rg = REGIONS.find(x=>x.id===region);
+    if (region==="snowy") B.log.push(`🎉 You beat the ${e.name}! DLC unlocked: 3 new regions are now open!`);
+    else if (rg && rg.dlc){
+      const all = REGIONS.filter(x=>x.dlc).every(x=>S.beaten[x.id]);
+      if (all) S.dlcDone = true;
+      B.log.push(`🎉 You beat the ${e.name}!` + (all ? " You beat every dragon in all of Realm-of-Regions 5! The DLC is finished, and its regions now join the main map for good." : ""));
+    } else {
+      const nr = REGIONS[REGIONS.findIndex(x=>x.id===region)+1];
+      B.log.push(`🎉 You beat the ${e.name}!` + (nr && ENEMIES[nr.id] ? ` ${nr.name} is now unlocked!` : ""));
+    }
+  }
+  render();
+}
+function lose(){
+  const lost = Math.floor(S.gold*CONFIG.deathGoldLoss);
+  S.gold -= lost; S.hp = 0; B.over = true; B.won = false;
+  B.log.push(`You fell in battle. You lost ${lost} gold.`);
+  render();
+}
+function endBattle(){
+  if (!B.won){ S.hp = S.maxHp; S.mp = S.maxMp; townMsg = "You woke up at the inn with full HP and MP."; }
+  else townMsg = "";
+  B = null; go("region");
+}
+
+render();
+</script>
+</body>
+</html>
